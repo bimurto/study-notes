@@ -506,3 +506,38 @@ Reflect Mapping is a java mapping which maps Avro types onto preexisting Java ty
 ### Avro Datafile
 It is Avro's container file format for storing sequences of Avro objects similar to SequenceFile. Avro datafiles are are designed to be portable across languages. 
 A datafile has a header containing metadata, including Avro schema and a sync master, followed by a series of blocks containing the serialized  Avro objects.
+
+## Chapter 13. Parquet
+Apache Parquet is ac columnar storage that can efficiently store nested data.  
+Columnar formats enable greater efficiency in both file size and query performance. File sizes are usually smaller because values from one column are stored next to each other which allows very efficient encoding. Query performance is improved since a query engine can skip over columns that are not needed. 
+
+Parquet can store data that has a deeply nested structure in true columnar fashion.
+Parquet is also supported by a large number of tools.
+
+### Data Model
+**Primitive Types**
+![Primitive Types](./images/HDG_table_13_1.PNG)
+
+Parquet Data is described by schema, which has root message containing a grep of fields. Each filed has a repetition (`required`, `optional` or `repeated`). For example, 
+```
+message WeatherRecord {
+    required int32 year;
+    required int32 temperature;
+    required binary stationId (UTF8);
+}
+```
+There is no primitive string type, Parquet defines logical types to interpret primitive types.
+![Logical Types](./images/HDG_table_13_2.PNG)
+
+### Parquet File Format
+```
+File format = Header + one or more blocks + Footer
+```
+Header contains 4 byte number `PAR1`, which identifies the file as Parquet and the metadata is stored in the footer which includes format version, schema, any extra key-value pairs and metadata for every block. The final two fields in the footer are a 4-byte field encoding the length of the footer metadata, and `PAR1`.
+
+The consequence of storing the metadata in the footer is that reading a Parquet file requires an initial seek to the end of the file (minus 8 bytes) to read the footer metadata length, then a second seek backward by that length to read the footer metadata. Unlike sequence files and Avro datafiles, where the metadata is stored in the header and sync markers are used to separate blocks, Parquet files  don’t need sync markers since the block boundaries are stored in the footer metadata. (This is possible because the metadata is written after all the blocks have been written, so the writer can retain the block boundary positions in memory until the file is closed.)  therefore, Parquet files are splittable, since the blocks can be located after reading the footer and can then be processed in parallel (by MapReduce, for example).
+
+Each block in a Parquet file stores a *row group*, which is made up of column chunks containing the column data for those rows. Each page contains values from the same column, making a page a very good candidate for compression since the values are likely to be similar. 
+
+![Internal Structure of Parquest File](./images/HDG_fig_13_1.PNG)
+
