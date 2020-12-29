@@ -539,5 +539,5 @@ The consequence of storing the metadata in the footer is that reading a Parquet 
 
 Each block in a Parquet file stores a *row group*, which is made up of column chunks containing the column data for those rows. Each page contains values from the same column, making a page a very good candidate for compression since the values are likely to be similar. 
 
-![Internal Structure of Parquest File](./images/HDG_fig_13_1.PNG)
+![Internal Structure of Parquet File](./images/HDG_fig_13_1.PNG)
 
