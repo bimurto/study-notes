@@ -117,3 +117,297 @@ Multiple reducers reduce different keys.
 * If entire node goes down, resource manager will try to restart it.
 * if resource manager goes down, HA using ZooKeeper have a standby.
 
+## Chapter 19. Introduction to Ambari
+Ambari is a UI for Hadoop Component
+Reset ambari admin pw
+```
+# su root
+# ambari-admin-password-reset
+```
+Ambari will restart. Login to Ambari with admin/new_pw
+
+## Chapter 20. Introducing Pig
+Pig uses Pig latin, a scripting language like sql to define map and reduce steps.
+Pig stand on top of  MapReduce and Tez which is faster than MapReduce and uses them, so there is no performance penalty for using Pig. 
+Tez uses directed acyclic graph looks into the inter relation of the steps and finds the most optimal path for executing steps , so it is faster than MapReduce.
+
+## Chapter 22. Find old 5-start movies with Pig
+```python
+ratings = LOAD '/user/maria_dev/ml-100k/u.data' AS (userID:int, movieID:int, rating:int, ratingTime:int);
+metadata = LOAD '/user/maria_dev/ml-100k/u.item' USING PigStorage('|')
+	AS (movieID:int, movieTitle:chararray, releaseDate:chararray, videoRealese:chararray, imdblink:chararray);
+   
+nameLookup = FOREACH metadata GENERATE movieID, movieTitle,
+	ToUnixTime(ToDate(releaseDate, 'dd-MMM-yyyy')) AS releaseTime;
+   
+ratingsByMovie = GROUP ratings BY movieID;
+avgRatings = FOREACH ratingsByMovie GENERATE group as movieID, AVG(ratings.rating) as avgRating;
+fiveStarMovies = FILTER avgRatings BY avgRating > 4.0;
+fiveStarsWithData = JOIN fiveStarMovies BY movieID, nameLookup BY movieID;
+oldestFiveStarMovies = ORDER fiveStarsWithData BY nameLookup::releaseTime;
+DUMP oldestFiveStarMovies;
+```
+
+## Chapter 23. More Pig Latin
+PIG QUERY commands
+* LOAD STORE DUMP
+* FILTER DISTINCT FOREACH/GENERATE MAPREDUCE STREAM SAMPLE
+* JOIN COGROUP GROUP CROSS CUBE
+* ORDER RANK LIMIT
+* UNION SPLIT
+
+Pig Diagnostic Commands
+* DESCRIBE
+* EXPLAIN
+* ILLUSTRATE
+
+PIG UDF Commands
+* REGISTER
+* DEFINE
+* IMPORT
+
+Others
+* AVG CONCAT COUNT MAX MIN SIZE SUM
+* PigStorage
+* TextLoader
+* JsonLoader
+* AvroStorage
+* ParquetLoader
+* OrcStorage
+* HBaseStorage
+
+## Chapter 26. Why Spark?
+ 
+![Spark Tasks](./images/udemy_hadoop_26_1.PNG)
+
+**Driver Program** is a script which controls what's going to happen in your job
+**Cluster manager** spark can use YARN or any other cluster manager like mesos or the built in cluster manager. Spark can run on Hadoop but it can work with other frameworks.
+
+**Executor** - spark tries to retain as much information it can in memory
+
+Spark is 100x faster than MapReduce in memory or 10x faster in disk.
+Spark uses Directed Acyclic Graph to optimize workflows.
+Spark is build around one main concept : the Resilient Distributed Dataset (RDD)
+
+![Spark Components](./images/udemy_hadoop_26_2.PNG)
+**Spark Streaming** - allows real time data ingestion and processing for Spark
+**Spark SQL** - SQL interface for Spark
+**MLLib** - machine learning and data mining library for Spark
+**GraphX** - graph interface for Spark
+
+## Chapter 27. THe Resilient Distributed Dataset (RDD)
+It is a abstraction that hides the real data from programmer and presents the user with a Dataset interface.
+
+**The SparkContext**
+* created by driver program
+* it creates and is responsible for RDD's
+* spark shell creates a `sc` object for user
+
+RDD's can be created from local file system, hdfs, s3, hive, JDBC, Cassandra, HBase, Elasticsearch, etc.
+
+**Transforming RDD's**
+* map
+* flatmap
+* filter
+* distinct
+* filter
+* sample
+* union, intersection, subtract, cartesian
+
+**RDD Actions**
+* collect
+* count
+* countByValue
+* take
+* top
+* reduce
+* and others
+
+## Chapter 28. Find the movie with the lowest average rating -with RDD's
+```python
+from pyspark import SparkConf, SparkContext
+
+# This function just creates a Python "dictionary" we can later
+# use to convert movie ID's to movie names while printing out
+# the final results.
+def loadMovieNames():
+    movieNames = {}
+    with open("ml-100k/u.item") as f:
+        for line in f:
+            fields = line.split('|')
+            movieNames[int(fields[0])] = fields[1]
+    return movieNames
+
+# Take each line of u.data and convert it to (movieID, (rating, 1.0))
+# This way we can then add up all the ratings for each movie, and
+# the total number of ratings for each movie (which lets us compute the average)
+def parseInput(line):
+    fields = line.split()
+    return (int(fields[1]), (float(fields[2]), 1.0))
+
+if __name__ == "__main__":
+    # The main script - create our SparkContext
+    conf = SparkConf().setAppName("WorstMovies")
+    sc = SparkContext(conf = conf)
+
+    # Load up our movie ID -> movie name lookup table
+    movieNames = loadMovieNames()
+
+    # Load up the raw u.data file
+    lines = sc.textFile("hdfs:///user/maria_dev/ml-100k/u.data")
+
+    # Convert to (movieID, (rating, 1.0))
+    movieRatings = lines.map(parseInput)
+
+    # Reduce to (movieID, (sumOfRatings, totalRatings))
+    ratingTotalsAndCount = movieRatings.reduceByKey(lambda movie1, movie2: ( movie1[0] + movie2[0], movie1[1] + movie2[1] ) )
+
+    # Map to (movieID, averageRating)
+    averageRatings = ratingTotalsAndCount.mapValues(lambda totalAndCount : totalAndCount[0] / totalAndCount[1])
+
+    # Sort by average rating
+    sortedMovies = averageRatings.sortBy(lambda x: x[1])
+
+    # Take the top 10 results
+    results = sortedMovies.take(10)
+
+    # Print them out:
+    for result in results:
+        print(movieNames[result[0]], result[1])
+```
+
+## Chapter 29. Datasets and Spark 2.0
+DataFrame extends RDD to a DataFrame object.
+DataFrame contain Row objects and can run SQL queries
+
+Use SparkSQL in Python
+```python
+from pyspark.sql import SQLContext, Row
+hiveContext = HiveContext(sc)
+inputData = spark.read.json(datafile)
+inputData.createOrReplaceTempView(structuredView)
+dataFrame = hiveContext.sql("sql query")
+```
+
+In Spark 2.0, a DataFrame in really a DataSet of Row objects.
+Use can use user defined functions.
+
+## Chapter 30. Find the movie with the lowest average rating -with DataFrames
+```python
+from pyspark.sql import SparkSession
+from pyspark.sql import Row
+from pyspark.sql import functions
+
+def loadMovieNames():
+    movieNames = {}
+    with open("ml-100k/u.item") as f:
+        for line in f:
+            fields = line.split('|')
+            movieNames[int(fields[0])] = fields[1]
+    return movieNames
+
+def parseInput(line):
+    fields = line.split()
+    return Row(movieID = int(fields[1]), rating = float(fields[2]))
+
+if __name__ == "__main__":
+    # Create a SparkSession
+    spark = SparkSession.builder.appName("PopularMovies").getOrCreate()
+
+    # Load up our movie ID -> name dictionary
+    movieNames = loadMovieNames()
+
+    # Get the raw data
+    lines = spark.sparkContext.textFile("hdfs:///user/maria_dev/ml-100k/u.data")
+    # Convert it to a RDD of Row objects with (movieID, rating)
+    movies = lines.map(parseInput)
+    # Convert that to a DataFrame
+    movieDataset = spark.createDataFrame(movies)
+
+    # Compute average rating for each movieID
+    averageRatings = movieDataset.groupBy("movieID").avg("rating")
+
+    # Compute count of ratings for each movieID
+    counts = movieDataset.groupBy("movieID").count()
+
+    # Join the two together (We now have movieID, avg(rating), and count columns)
+    averagesAndCounts = counts.join(averageRatings, "movieID")
+
+    # Pull the top 10 results
+    topTen = averagesAndCounts.orderBy("avg(rating)").take(10)
+
+    # Print them out, converting movie ID's to names as we go.
+    for movie in topTen:
+        print (movieNames[movie[0]], movie[1], movie[2])
+
+    # Stop the session
+    spark.stop()
+```
+
+
+## Chapter 31. Movie recommendations with MLLib
+```python
+from pyspark.sql import SparkSession
+from pyspark.ml.recommendation import ALS
+from pyspark.sql import Row
+from pyspark.sql.functions import lit
+
+# Load up movie ID -> movie name dictionary
+def loadMovieNames():
+    movieNames = {}
+    with open("ml-100k/u.item") as f:
+        for line in f:
+            fields = line.split('|')
+            movieNames[int(fields[0])] = fields[1].decode('ascii', 'ignore')
+    return movieNames
+
+# Convert u.data lines into (userID, movieID, rating) rows
+def parseInput(line):
+    fields = line.value.split()
+    return Row(userID = int(fields[0]), movieID = int(fields[1]), rating = float(fields[2]))
+
+
+if __name__ == "__main__":
+    # Create a SparkSession
+    spark = SparkSession.builder.appName("MovieRecs").getOrCreate()
+
+    # Load up our movie ID -> name dictionary
+    movieNames = loadMovieNames()
+
+    # Get the raw data
+    lines = spark.read.text("hdfs:///user/maria_dev/ml-100k/u.data").rdd
+
+    # Convert it to a RDD of Row objects with (userID, movieID, rating)
+    ratingsRDD = lines.map(parseInput)
+
+    # Convert to a DataFrame and cache it
+    ratings = spark.createDataFrame(ratingsRDD).cache()
+
+    # Create an ALS collaborative filtering model from the complete data set
+    als = ALS(maxIter=5, regParam=0.01, userCol="userID", itemCol="movieID", ratingCol="rating")
+    model = als.fit(ratings)
+
+    # Print out ratings from user 0:
+    print("\nRatings for user ID 0:")
+    userRatings = ratings.filter("userID = 0")
+    for rating in userRatings.collect():
+        print movieNames[rating['movieID']], rating['rating']
+
+    print("\nTop 20 recommendations:")
+    # Find movies rated more than 100 times
+    ratingCounts = ratings.groupBy("movieID").count().filter("count > 100")
+    # Construct a "test" dataframe for user 0 with every movie rated more than 100 times
+    popularMovies = ratingCounts.select("movieID").withColumn('userID', lit(0))
+
+    # Run our model on that list of popular movies for user ID 0
+    recommendations = model.transform(popularMovies)
+
+    # Get the top 20 movies with the highest predicted rating for this user
+    topRecommendations = recommendations.sort(recommendations.prediction.desc()).take(20)
+
+    for recommendation in topRecommendations:
+        print (movieNames[recommendation['movieID']], recommendation['prediction'])
+
+    spark.stop()
+
+```
