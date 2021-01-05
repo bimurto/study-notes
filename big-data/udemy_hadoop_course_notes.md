@@ -411,3 +411,404 @@ if __name__ == "__main__":
     spark.stop()
 
 ```
+## Chapter 34. What is Hive?
+Translates SQL queries to MapReduce or Tez jobs on your cluster.
+Advantages
+* scalable
+* easier
+* optimized
+* extensible
+Disadvantages
+* high latency
+* no transactions
+* no record level update, delete, insert
+
+## Chapter 36. How Hive works ?
+Hive maintains a `metastore` that applies a structure on the unstructured data when you are reading.
+Other RDBMS applies schema while write but Hive stores the data as unstructured but applies schema while reading.
+
+Create table command
+```sql
+CREATE TABLE ratings (
+    userID INT,
+    movieID INT,
+    rating INT,
+    time INT)
+ROW FORMAT DELIMTED FIELDS TERMINATED BY '\t' STORED AS TEXTFILE;
+LOAD DATA LOCAL INPATH '${env:HOME}/ml-100k/u.data' OVERWRITE INTO TABLE ratings;
+```
+
+HIVE *moves* data from distributed filesystem into Hive while `LOAD DATA`
+HIVE *copies* data from distributed filesystem into Hive while `LOAD DATA LOCAL`
+
+Managed Table : Hive takes ownership of the data. Drop command will delete the data.
+External Table: Hive will not have ownership of the data. Drop command will delete the metadata but not the actual data.
+```sql
+CREATE EXTERNAL TABLE IF NOT EXISTS ratings (
+    userID INT,
+    movieID INT,
+    rating INT,
+    time INT)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t’' LOCATION '/data/ml-100k/u.data';
+```
+You can store your data in partitioned subdirectories – Huge optimization if your queries are only on certain partitions.
+
+```sql
+CREATE TABLE customers (
+    name STRING,
+    address STRUCT<street:STRING, city:STRING, state:STRING, zip:INT>)
+PARTITIONED BY (country STRING);
+```
+File Structure
+```
+.../customers/country=CA/
+.../customers/country=GB/
+```
+
+## Chapter 39. Integrating MySQL with Hadoop
+Scoop exports data from RDBMS to HDFS.
+Scoops runs multiple mapReduce jobs to export data from RDBMS to HDFS.
+![Sqoop Workflow](./images/udemy_hadoop_39_1.PNG)
+
+## Chapter 43. Why NoSQL ?
+For analytic queries , Hive, Pig, Spark etc. work great.
+But for work at giant scale, non relational database is fast and scalable.
+
+## Chapter 44. What is HBase
+HBase is a non relational scalable database built on HDFS.
+HBase splits up different Region Servers (Region means ranges of keys).
+HBase supports auto sharding.
+HMaster keeps the schema of the data.
+ZooKeeper keeps track of HMaster master nodes.
+![HBase Architecture](./images/udemy_hadoop_44_1.PNG)
+
+### HBase Data Models
+* Fast access to any given ROW
+* A ROW is referenced by a unique KEY
+* Each ROW has some small number of COLUMN FAMILIES
+* A COLUMN FAMILY may contain arbitrary COLUMNS
+* You can have a very large number of COLUMNS in a COLUMN FAMILY
+* Each CELL can have many VERSIONS with given timestamps
+* Sparse data is A-OK –missing columns in a row consume no storage.
+
+
+## Chapter 45. Import movie rating into HBase
+Python client with hbase rest client
+```python
+from starbase import Connection
+
+c = Connection("127.0.0.1", "8000")
+
+ratings = c.table('ratings')
+
+if (ratings.exists()):
+    print("Dropping existing ratings table\n")
+    ratings.drop()
+
+ratings.create('rating')
+
+print("Parsing the ml-100k ratings data...\n")
+ratingFile = open("e:/Downloads/ml-100k/ml-100k/u.data", "r")
+
+batch = ratings.batch()
+
+for line in ratingFile:
+    (userID, movieID, rating, timestamp) = line.split()
+    batch.update(userID, {'rating': {movieID: rating}})
+
+ratingFile.close()
+
+print ("Committing ratings data to HBase via REST service\n")
+batch.commit(finalize=True)
+
+print ("Get back ratings for some users...\n")
+print ("Ratings for user ID 1:\n")
+print (ratings.fetch("1"))
+print ("Ratings for user ID 33:\n")
+print (ratings.fetch("33"))
+
+ratings.drop()
+```
+
+## Chapter 46. Use HBase with Pig to import data at scale
+PIG script
+```python
+users = LOAD '/user/maria_dev/ml-100k/u.user' 
+USING PigStorage('|') 
+AS (userID:int, age:int, gender:chararray, occupation:chararray, zip:int);
+
+STORE users INTO 'hbase://users' 
+USING org.apache.pig.backend.hadoop.hbase.HBaseStorage (
+'userinfo:age,userinfo:gender,userinfo:occupation,userinfo:zip');
+```
+
+## Chapter 47. Cassandra Overview
+Cassandra is a distributed database system with no single point fo failure. It has no master node , so it's has been engineered for availability. It has CQL query language for interface. 
+CAP theorem - ` You can have only 2 of 3: consistency, availability and partition tolerance`. Partition tolerance is a must for big data. 
+Cassandra favors availability over consistency. It is eventually consistent. You will not get your data right away and it might take a few seconds to propagate. But cassandra can be tuned for consistency. You can specify the requirements for consistency as how many nodes to agree on a result before acceptance.
+
+## Chapter 50. Write Spark Output into Cassandra
+Use SPARK 2
+```python
+from pyspark.sql import SparkSession
+from pyspark.sql import Row
+from pyspark.sql import functions
+
+def parseInput(line):
+    fields = line.split('|')
+    return Row(user_id = int(fields[0]), age = int(fields[1]), gender = fields[2], occupation = fields[3], zip = fields[4])
+
+if __name__ == "__main__":
+    # Create a SparkSession
+    spark = SparkSession.builder.appName("CassandraIntegration").config("spark.cassandra.connection.host", "127.0.0.1").getOrCreate()
+
+    # Get the raw data
+    lines = spark.sparkContext.textFile("hdfs:///user/maria_dev/ml-100k/u.user")
+    # Convert it to a RDD of Row objects with (userID, age, gender, occupation, zip)
+    users = lines.map(parseInput)
+    # Convert that to a DataFrame
+    usersDataset = spark.createDataFrame(users)
+
+    # Write it into Cassandra
+    usersDataset.write\
+        .format("org.apache.spark.sql.cassandra")\
+        .mode('append')\
+        .options(table="users", keyspace="movielens")\
+        .save()
+
+    # Read it back from Cassandra into a new Dataframe
+    readUsers = spark.read\
+    .format("org.apache.spark.sql.cassandra")\
+    .options(table="users", keyspace="movielens")\
+    .load()
+
+    readUsers.createOrReplaceTempView("users")
+
+    sqlDF = spark.sql("SELECT * FROM users WHERE age < 20")
+    sqlDF.show()
+
+    # Stop the session
+    spark.stop()
+```
+
+## Chapter 51. MongoDB Overview
+Document based NoSQL database. Prefers Consistency and Partition Tolerance over Availability.
+
+## Chapter 52. Integrate Spark with MongoDB
+```python
+from pyspark.sql import SparkSession
+from pyspark.sql import Row
+from pyspark.sql import functions
+
+def parseInput(line):
+    fields = line.split('|')
+    return Row(user_id = int(fields[0]), age = int(fields[1]), gender = fields[2], occupation = fields[3], zip = fields[4])
+
+if __name__ == "__main__":
+    # Create a SparkSession
+    spark = SparkSession.builder.appName("MongoDBIntegration").getOrCreate()
+
+    # Get the raw data
+    lines = spark.sparkContext.textFile("hdfs:///user/maria_dev/ml-100k/u.user")
+    # Convert it to a RDD of Row objects with (userID, age, gender, occupation, zip)
+    users = lines.map(parseInput)
+    # Convert that to a DataFrame
+    usersDataset = spark.createDataFrame(users)
+
+    # Write it into MongoDB
+    usersDataset.write\
+        .format("com.mongodb.spark.sql.DefaultSource")\
+        .option("uri","mongodb://127.0.0.1/movielens.users")\
+        .mode('append')\
+        .save()
+
+    # Read it back from MongoDB into a new Dataframe
+    readUsers = spark.read\
+    .format("com.mongodb.spark.sql.DefaultSource")\
+    .option("uri","mongodb://127.0.0.1/movielens.users")\
+    .load()
+
+    readUsers.createOrReplaceTempView("users")
+
+    sqlDF = spark.sql("SELECT * FROM users WHERE age < 20")
+    sqlDF.show()
+
+    # Stop the session
+    spark.stop()
+
+```
+
+## Chapter 54. Choosing a database technology
+CAP Consideration
+![CAP Consideration](./images/udemy_hadoop_54_1.PNG)
+
+## Chapter 56. Overview of Drill
+Drill is a SQL query engine for a variety of non-relational databases and data files
+Supports
+* Hive, MongoDB, HBase
+* flat JSON or Parquet files on HDFS, S3, AZURE, Google Cloud, local FileSystem
+
+Drill can run SQL queries on multiple databases with multiple file systems. Drill can also join tables from different databases.
+
+## Chapter 59. Overview of Phoenix
+Phoenix is a SQL driver for HBASE with Transactional Support. It is fast and with low latency with OLTP support.
+Integrates with MapReduce, Spark, Hive, Pig, Flume
+
+![Phoenix Architecture](./images/udemy_hadoop_59_1.PNG)
+
+## Chapter 61. Integrate Phoenix with Pig
+```python
+REGISTER /usr/hdp/current/phoenix-client/phoenix-client.jar
+
+users = LOAD '/user/maria_dev/ml-100k/u.user' 
+USING PigStorage('|') 
+AS (USERID:int, AGE:int, GENDER:chararray, OCCUPATION:chararray, ZIP:chararray);
+
+STORE users into 'hbase://users' using
+    org.apache.phoenix.pig.PhoenixHBaseStorage('localhost','-batchSize 5000');
+
+occupations = load 'hbase://table/users/USERID,OCCUPATION' using org.apache.phoenix.pig.PhoenixHBaseLoader('localhost');
+
+grpd = GROUP occupations BY OCCUPATION; 
+cnt = FOREACH grpd GENERATE group AS OCCUPATION,COUNT(occupations);
+DUMP cnt;  
+```
+
+## Chapter 62. Overview of Presto
+Presto is a similar tool like Drill. It can connect to many different `big data` databases and data stores and query across them. Optimized for analytical queries and data warehousing.
+Presto has a Cassandra connector but Drill does not have one.
+Can connect to :
+* Cassandra
+* Hive
+* MongoDB
+* MySQL
+* Local Files
+* Others like Kafka, JMX, Postgres, Redis, Accumulo
+
+
+## Chapter 65. YARN Explained
+Yet Another Resource Negotiator
+* Introduced in Hadoop 2–Separates the problem of managing resources on your cluster from MapReduce
+* Enabled development of MapReduce alternatives (Spark, Tez) built on top of YARN
+
+![YARN workflow](./images/udemy_hadoop_59_1.PNG)
+
+**How Yarn Works**
+* Your application talks to the Resource Manager to distribute work to your cluster
+* You can specify data locality –which HDFS block(s) do you want to process? YARN will try to get your process on the same node that has your HDFS blocks
+* You can specify different scheduling options for applications. So you can run more than one application at once on your cluster. FIFO, Capacity, and Fair schedulers
+    - FIFO runs jobs in sequence, first in first out
+    - Capacity may run jobs in parallel if there’s enough spare capacity
+    - Fair may cut into a larger running job if you just want to squeeze in a small one
+
+## Chapter 66. Tez Explained
+It’s an application framework clients can code against as a replacement for MapReduce.
+Tez constructs Directed Acyclic Graphs (DAGs) for more efficient processing of distributed jobs–Relies on a more holistic view of your job and eliminates unnecessary steps and dependencies. Tez optimizes physical data flow and resource usage.
+
+## Chapter 68. Mesos Explained
+Alternate of YARN
+Mesos can allocate resources for entire data center instead only working with Hadoop echo system. Mesos is a more general purpose resource manager. 
+Mesos integrates with Hadoop ecosystem.
+- Spark and Storm can work with mesos instead of YARN
+- YARN can integrated with mesos with Myriad
+
+Mesos vs YARN
+* YARN is a monolithic scheduler 
+    – you give it a job, and YARN figures out where to run
+* Mesos is a two-tiered system
+    – Mesos just makes offers of resources to your application (“framework”)
+    – Your framework decides whether to accept or reject them
+    – You also decide your own scheduling algorithm
+* YARN is optimized for long, analytical jobs like you see in Hadoop
+* Mesos is built to handle that, as well as long-lived processes (servers) and short-lived processes as well.
+
+## Chapter 69. Zookeeper Explained
+* It basically keeps track of information that must be synchronized across your cluster
+    – Which node is the master?
+    – What tasks are assigned to which workers?
+    – Which workers are currently available?
+* It’s a tool that applications can use to recover from partial failures in your cluster.
+* An integral part of HBase, High-Availability (HA) MapReduce, Drill, Storm, Solr, and much more
+
+**Primitive operations in a distributed system**
+* Master election
+* Crash Detection
+* Group Management
+* Metadata management
+
+**Zookeeper API**
+* Really a little distributed file system
+    – With strong consistency guarantees
+    – Replace the concept of `file` with `znode` and you’ve pretty much got it
+* Here’s the ZooKeeperAPI:–Create, delete, exists, setData, getData, getChildren
+
+![Zookeeper Master Slave Design](./images/udemy_hadoop_59_1.PNG)
+
+## Chapter 71. Oozie explained
+Oozie is a system for running and scheduling hadoop tasks.
+
+**Workflow**
+* You need a multi staged hadoop job (multi chain with MapReduce, Hive, Pig and others)
+* A workflow is a Directed Acyclic Graph of Actions - specified via XML which can be run in parallel.
+
+![Oozie Example](./images/udemy_hadoop_71_1.PNG)
+
+Oozie configuration
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<workflow-app xmlns="uri:oozie:workflow:0.2" name="old-movies">
+    <start to="sqoop-node"/>
+ 
+    <action name="sqoop-node">
+        <sqoop xmlns="uri:oozie:sqoop-action:0.2">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+            <prepare>
+                <delete path="${nameNode}/user/maria_dev/movies"/>
+            </prepare>
+ 
+            <configuration>
+                <property>
+                    <name>mapred.job.queue.name</name>
+                    <value>${queueName}</value>
+                </property>
+            </configuration>
+            <command>import --connect jdbc:mysql://localhost/movielens --driver com.mysql.jdbc.Driver --table movies -m 1</command>
+        </sqoop>
+        <ok to="hive-node"/>
+        <error to="fail"/>
+    </action>
+  
+    <action name="hive-node">
+        <hive xmlns="uri:oozie:hive-action:0.2">
+            <job-tracker>${jobTracker}</job-tracker>
+            <name-node>${nameNode}</name-node>
+            <prepare>
+                <delete path="${nameNode}/user/maria_dev/oldmovies"/>
+            </prepare>
+            <configuration>
+                <property>
+                    <name>mapred.job.queue.name</name>
+                    <value>${queueName}</value>
+                </property>
+            </configuration>
+            <script>oldmovies.sql</script>
+            <param>OUTPUT=/user/maria_dev/oldmovies</param>
+        </hive>
+        <ok to="end"/>
+        <error to="fail"/>
+    </action>
+ 
+    <kill name="fail">
+        <message>Sqoop failed, error message[${wf:errorMessage(wf:lastErrorNode())}]</message>
+    </kill>
+    <end name="end"/>
+</workflow-app>
+```
+
+Oozie Coordinator: Schedules Oozie workflow execution
+Oozie Bundles: is a collection of coordinators that can be merged together.
+
+
+
+
