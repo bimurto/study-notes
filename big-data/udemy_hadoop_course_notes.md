@@ -757,8 +757,13 @@ Oozie configuration
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <workflow-app xmlns="uri:oozie:workflow:0.2" name="old-movies">
-    <start to="sqoop-node"/>
- 
+    <start to="fork-node"/>
+    
+    <fork name="fork-node">
+        <path start="sqoop-node">
+        <path start="hive-node">
+    </fork>
+
     <action name="sqoop-node">
         <sqoop xmlns="uri:oozie:sqoop-action:0.2">
             <job-tracker>${jobTracker}</job-tracker>
@@ -775,10 +780,20 @@ Oozie configuration
             </configuration>
             <command>import --connect jdbc:mysql://localhost/movielens --driver com.mysql.jdbc.Driver --table movies -m 1</command>
         </sqoop>
-        <ok to="hive-node"/>
+        <ok to="joining"/>
+        <error to="fail"/>
+    </action>
+
+    <action name="pig-node">
+        <pig xmlns="uri:oozie:sqoop-action:0.2">
+            ... pig configuration
+        </pig>
+        <ok to="joining"/>
         <error to="fail"/>
     </action>
   
+    <join name="joining" to="hive-node"/>
+
     <action name="hive-node">
         <hive xmlns="uri:oozie:hive-action:0.2">
             <job-tracker>${jobTracker}</job-tracker>
@@ -810,5 +825,150 @@ Oozie Coordinator: Schedules Oozie workflow execution
 Oozie Bundles: is a collection of coordinators that can be merged together.
 
 
+## Chapter 74. Zepplin Overview
+Zepplin is a notebook interface to your big data similar to IPython notebook. Zepplin allows user to run scripts againt their data interactively. Zeppline can interleave nicely formatted notes and zepplin notebooks are shareable. 
 
+
+## Chapter 77. Hue Overview
+Hue stands for Hadoop User Experience. Hue is used for query, files ui and notebook in Cloudera distribution. Hue plays a similar role like Ambari in Cloudera distribution. Hue has built in Oozie workflow editor and notebooks.
+
+## Chapter 78. Other technologies worth mentioning
+**Ganglia** - distributed monitoring system, replaced by Ambari, Cloudera manager, Grafana
+**Chukwa** - system for collecting and analyzing logs from Hadoop cluster, replaced by Flume and Kafka
+
+## Chapter 79. Kafka Explained
+Streaming allows publish data in real time to you cluster and it can be processed in real time as it comes in.
+
+**Problems in stream setup**
+* How to get data from different sources to your cluster
+* Processing the data when it arrives
+
+Kafka is a publisher subscriber messaging system. Kafka stores all incoming messages from publishers for some period of time and publishes them to a stream of data called topic. Kafka consumers subscribe to one or more topics and receive data as it's published. A stream/topic can have many different consumers, all with their own position in the stream maintained.
+
+![Kafka Architecture](./images/udemy_hadoop_79_1.PNG)
+
+**Connector** - Connectors are plugin modules for variaous databases that will automatically either publish new rows to a topic or receive messages from topic.
+
+**Stream Processor** - Stream processors read from one topic transform the data and then publishes to another topic in kafka
+
+## Chapter 82. Flume Explained
+Flume is another way to stream data into your cluster. Flume was build with Hadoop in mind and has build int sinks for HDFS and HBase. 
+
+![Anatomy of Flume Agent and Flow](./images/udemy_hadoop_82_1.PNG)
+
+**Source** - Where data is coming from
+**Channel** - how the data is trasferred (memory/file)
+**Sink** - where data is going
+
+![Multi Tier Flume Topology](./images/udemy_hadoop_82_1.PNG)
+You can build multi tier topology with flume agents. Flume agents with tiering uses avro soruce and avro sink to connect to tiers. Flume acts as a buffer between source and final desination.
+
+## Chapter 83. Setup flume
+Flume conf with source as netcat and sink as logger
+```properties
+# example.conf: A single-node Flume configuration
+
+# Name the components on this agent
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+# Describe/configure the source
+a1.sources.r1.type = netcat
+a1.sources.r1.bind = localhost
+a1.sources.r1.port = 44444
+
+# Describe the sink
+a1.sinks.k1.type = logger
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1
+``` 
+
+## Chapter 84. Flume monitor a directory and store data in HDFS
+Flume conf with source as Spooldir and sink as HDFS
+```properties
+# flumelogs.conf: A single-node Flume configuration
+
+# Name the components on this agent
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+# Describe/configure the source
+a1.sources.r1.type = spooldir
+a1.sources.r1.spoolDir = /home/maria_dev/spool
+a1.sources.r1.fileHeader = true
+a1.sources.r1.interceptors = timestampInterceptor
+a1.sources.r1.interceptors.timestampInterceptor.type = timestamp
+
+# Describe the sink
+a1.sinks.k1.type = hdfs
+a1.sinks.k1.hdfs.path = /user/maria_dev/flume/%y-%m-%d/%H%M/%S
+a1.sinks.k1.hdfs.filePrefix = events-
+a1.sinks.k1.hdfs.round = true
+a1.sinks.k1.hdfs.roundValue = 10
+a1.sinks.k1.hdfs.roundUnit = minute
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1
+```
+
+## Chapter 85. Spark Streaming: Introduction
+![Spark Streaming High Level](./images/udemy_hadoop_85_1.PNG)
+Spark clusters have some receivers of data which receives the data. Spark streaming splits the data into little chunks. Spark streaming will fetch data from the stream for a specified time and create RDD with that bit of data. After that spark can process the data like any other RDD.
+
+**DStream**
+DStream is the interface over the batch of micro RDDs. DStream generates RDD for each time step and produce output at each time step. You can apply all operations of RDD to DStream and the operations will be applied to all new RDDs as they are appended to the DStream.
+
+**Windowed Transformation**
+This allows you to compute results across a longer period of time than batch interval. Spark keeps a copy of all batches of that window of time and when needed can perform operation on all batches of that time period or window. The window slides as time goes on to represent batches within the window interval.
+
+**Batch Interval** - time period after all datas in the stream are processed into a discrete RDD, usually very small like 1s .
+**Slide Interval** - how often a windowed tranfromation in computed, 
+**Window interval** - how far back in time the windowed transformation goes. How loag before spark can compute old data.
+
+**Structured Streaming** - new API as replacement of DStream, will be used in future. Structured streaming thinks the data as DataFrame where new rows are appended to it continuously. 
+
+## Chapter 89. Apache Storm
+Another framework for processing continuos streams of data on a cluster. Storm works on indivudual events, not micro batches like Spark Streaming. So storm can provide sub seconds latency. Core storm offers `tumbling windows` with `sliding windows`. Kafka + Storm is a popular combination.
+
+**Stream** - stream consists of tuples of data that flows
+**Spouts** - sources of stream data
+**Bolts** - the processor that processes streamed data at it's received.
+**Topology** - graph of spouts and bolts
+![Storm Topology](./images/udemy_hadoop_85_1.PNG)
+
+**Storm Core** - lower level api
+**Trident** - Higher level api
+Storm jobs runs forever until stopped.
+
+## Chapter 91. Flink
+Another stream processing engine similar to storm. Flink can run on standalone cluster or on YARN. Flink is highly scalable and fault tolerant. Flink has its own eco system like Spark.
+![Flink Architecture](./images/udemy_hadoop_91_1.PNG) 
+
+## Chapter 93. The Best of Rest
+**Impala** : Cloudera's alternative to Hive, a Massively parallel SQL engine on Hadoop. Impala is always running , so it can avoid start up time. Impala is faster than Hive but Hive is more versatile. Impala can be used with Cloudera distribution.
+
+**Accumulo** : Bigtable clone like HBase. Offers better security model and server side programming. Can be used when you have complex security requirements.
+
+**Ignite** : In memory database with ACID and SQL
+
+**Nifi** : Directed graph of data routing. It offers a web ui for designing complex systems.
+
+**Falcon** : A data governace engine that sits on top of oozie. It allows construction of data processing graphs, but it's really meant to organize the flow of data in Hadoop.
+
+**Apache Slider** : A deployment and monitoring tool for apps on a YARN cluster.
 
