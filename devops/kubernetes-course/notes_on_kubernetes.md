@@ -305,3 +305,151 @@ See Rollout history
 `kubectl rollout history deployment/deployment_name`
 Undo last rollout
 `kubectl rollout undo deployment/deployment_name`
+
+#### Command and Argument
+ENTRYPOINT in docker -> command in POD
+CMD in docker -> args in POD
+
+#### Environment Variables in POD
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  labels:
+    tier: front-end
+spec:
+  containers:
+    - name: nginx
+      image: nginx
+      env:
+      - key: ENV_VAR
+        value: value
+      - key: ENV_VAR_CONFIG_MAP
+        valueFrom: 
+          configMapKeyRef: 
+      - key: ENV_VAR_SECRET_KEY
+        valueFrom: 
+          secretKeyRef: 
+```
+
+#### Create a ConfigMap
+`kubectl create configmap config_map_name --from-literal=KEY1=value1 --from-literal=KEY2=value2`
+`kubectl create configmap config_map_name --from-file=config.properties`
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config_map_name
+data:
+  KEY1: value1
+  KEY2: value2
+```
+
+#### Add configmap in POD
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  labels:
+    tier: front-end
+spec:
+  containers:
+    - name: nginx
+      image: nginx
+      env:
+      - key: ENV_VAR_CONFIG_MAP
+        valueFrom: 
+          configMapKeyRef: 
+            name: config_map_name
+            key: KEY1
+```
+or
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  labels:
+    tier: front-end
+spec:
+  containers:
+    - name: nginx
+      image: nginx
+      envFrom: 
+      - configMapRef: 
+          name: config_map_name
+```
+
+#### Create a Secret
+`kubectl create secret generic secret_name --from-literal=KEY1=value1 --from-literal=KEY2=value2`
+`kubectl create secret generic secret_name --from-file=config.properties`
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: secret_name
+data:
+  KEY1: base64_encoded(value1)
+  KEY2: base64_encoded(value2)
+```
+use base64 to encode values of secret in yaml file
+
+#### Add secret in POD
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  labels:
+    tier: front-end
+spec:
+  containers:
+    - name: nginx
+      image: nginx
+      env:
+      - key: ENV_VAR_CONFIG_MAP
+        valueFrom: 
+          secretKeyRef: 
+            name: secret_name
+            key: KEY1
+```
+or
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  labels:
+    tier: front-end
+spec:
+  containers:
+    - name: nginx
+      image: nginx
+      envFrom: 
+      - secretRef: 
+          name: secret_name
+```
+
+#### Create an InitContainer
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-pod
+  labels:
+    app: myapp
+spec:
+  containers:
+  - name: myapp-container
+    image: busybox:1.28
+    command: ['sh', '-c', 'echo The app is running! && sleep 3600']
+  initContainers:
+  - name: init-myservice
+    image: busybox:1.28
+    command: ['sh', '-c', 'until nslookup myservice; do echo waiting for myservice; sleep 2; done;']
+  - name: init-mydb
+    image: busybox:1.28
+    command: ['sh', '-c', 'until nslookup mydb; do echo waiting for mydb; sleep 2; done;']
+```
