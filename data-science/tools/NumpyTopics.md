@@ -1,4 +1,4 @@
-NumPy Topics:
+#NumPy 
 
 ### Installing NumPy
 `conda install numpy`
@@ -52,3 +52,6 @@ When you print an array, NumPy displays it in a similar way to nested lists, but
 
 ### Basic array operations
 
+
+
+P
