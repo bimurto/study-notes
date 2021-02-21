@@ -453,3 +453,95 @@ spec:
     image: busybox:1.28
     command: ['sh', '-c', 'until nslookup mydb; do echo waiting for mydb; sleep 2; done;']
 ```
+
+
+## CLuster Management
+
+#### OS upgrades
+**Drain the nodes**
+`kubectl drain node_name`
+**Apply restriction** stop scheduler from scheduling pod in the node
+`kubectl cordon node_name`
+**Remove restriction** allow scheduler to schedule pod in the node
+`kubectl uncordon node_name`
+
+#### Cluster Upgrade
+Kubernetes cluster can be upgraded only one minor version at a time.
+
+**Plan Upgrade**
+`kubeadm upgrade plan`
+
+**Master Upgrade**
+Upgrade kubeadm : `apt upgrade -y kubeadm=1.12.0-00`
+Upgrade controlplane components: `kubeadm upgrade apply v1.12.0`
+If you have kubelet in controlplane node
+Upgrade kubectl: `apt upgrade -y kubelet=1.12.0.-00`
+Restart kubelet: `systemctl restart kubelet`
+
+**Worker node upgrade**
+Drain node-1: `kubectl drain node-1`
+Upgrade kubeadm : `apt upgrade -y kubeadm=1.12.0-00`
+Upgrade kubectl: `apt upgrade -y kubelet=1.12.0.-00`
+Update node config for new kubelet: `kubeadm upgrade node config --kubelet-version v1.12.0`
+Restart kubelet: `systemctl restart kubelet`
+Uncordon node-1: `kubectl uncordon node-1`
+
+https://v1-19.docs.kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/
+
+#### Backup and Restore
+**Backup Objects**
+`kubectl get all --all-namespaces -o yaml > all-deployed-services.yaml`
+or Velero tool
+
+**Backup ETCD**
+```bash
+ETCDCTL_API=3 etcdctl snapshot save snapshot.db \
+  --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/server.crt \
+  --key=/etc/kubernetes/pki/etcd/server.key
+```
+
+**Restore ETCD**
+`service kube-apiserver stop`
+```bash
+ETCDCTL_API=3 etcdctl snapshot restore snapshot.db \
+  --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/server.crt \
+  --key=/etc/kubernetes/pki/etcd/server.key
+  --data-dir /var/lib/etcd-from-backup
+```
+Update etcd pod in /etc/kubernetes/manifests with `--data-dir=/var/lib/etcd-from-backup`
+and volume and mount path with new data dir path.
+`systemctl daemon-reload`
+`service etcd restart`
+`service kube-apiserver start`
+/etc/kubernetes/pki/etcd/
+
+## Security
+
+#### Certificates API
+Generate Key : `openssl genrsa -out jane.key 2048`
+Generate CSR: `openssl req -new -key jane.key subj "/CN=jane" -out jane.csr`
+Base64 Encode CSR: `cat jane.csr | base64`
+```yaml
+apiVersion: certificates.k8s.io/v1beta1
+kind: CertificateSigningRequest
+metadata:
+  name: jane
+spec:
+  groups:
+  - system:authenticated
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth
+  request: base64_encoded_data  
+```
+Get all CSR requests: `kubectl get csr`
+Approve CSR requests: `kubectl certificate approve jane`
+Deny CSR requests: `kubectl certificate deny jane`
+Get certificate in Yaml : `kubectl get csr jane -o yaml`
+Decode certificate data: `echo data | base64 --decode`
+
